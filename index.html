@@ -5,114 +5,245 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>HoloFlux</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #050505; overflow: hidden; font-family: sans-serif; }
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #080810; overflow: hidden; font-family: -apple-system, 'SF Pro Display', sans-serif; }
   #canvas { display: block; width: 100vw; height: 100vh; }
 
-  #webcam-container {
+  /* ── Webcam panel ──────────────────────────────────── */
+  #webcam-panel {
     position: fixed;
-    top: 16px;
-    right: 16px;
-    width: 180px;
-    height: 135px;
-    border-radius: 10px;
+    top: 20px;
+    right: 20px;
+    width: 188px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 16px;
     overflow: hidden;
-    border: 1px solid rgba(255,255,255,0.15);
     z-index: 100;
-    background: #111;
+    backdrop-filter: blur(12px);
   }
-  #webcam {
+  #webcam-video-wrap {
+    position: relative;
     width: 100%;
-    height: 100%;
-    object-fit: cover;
-    transform: scaleX(-1);
+    height: 141px;
+    background: #0c0c14;
   }
+  #webcam { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); display: block; }
   #lm-canvas {
-    position: absolute;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-    transform: scaleX(-1);
-    pointer-events: none;
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    transform: scaleX(-1); pointer-events: none;
   }
-  #webcam-label {
-    position: absolute;
-    bottom: 6px;
-    left: 8px;
-    font-size: 10px;
-    color: rgba(255,255,255,0.4);
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    pointer-events: none;
+  #webcam-footer {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 10px;
+    border-top: 1px solid rgba(255,255,255,0.07);
+  }
+  #hand-status {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; color: rgba(255,255,255,0.4);
+    letter-spacing: 0.05em; text-transform: uppercase;
+  }
+  #status-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: rgba(255,200,60,0.7);
+    box-shadow: 0 0 6px rgba(255,200,60,0.5);
+    transition: background 0.4s, box-shadow 0.4s;
+  }
+  #status-dot.ready  { background: rgba(60,220,120,0.85); box-shadow: 0 0 6px rgba(60,220,120,0.5); }
+  #status-dot.error  { background: rgba(255,80,80,0.85);  box-shadow: 0 0 6px rgba(255,80,80,0.5); }
+  #pinch-meter {
+    display: flex; align-items: center; gap: 4px;
+  }
+  #pinch-icon { font-size: 12px; opacity: 0.35; }
+  #pinch-bar-track {
+    width: 36px; height: 3px;
+    background: rgba(255,255,255,0.1); border-radius: 99px; overflow: hidden;
+  }
+  #pinch-bar-fill {
+    height: 100%; width: 50%;
+    background: rgba(100,180,255,0.6); border-radius: 99px;
+    transition: width 0.1s linear;
   }
 
-  #ui {
+  /* ── Shape selector ────────────────────────────────── */
+  #shape-selector {
     position: fixed;
-    bottom: 24px;
-    left: 50%;
-    transform: translateX(-50%);
+    left: 20px;
+    top: 50%;
+    transform: translateY(-50%);
     display: flex;
-    gap: 10px;
+    flex-direction: column;
+    gap: 8px;
     z-index: 100;
   }
   .shape-btn {
-    padding: 8px 18px;
-    border: 1px solid rgba(255,255,255,0.15);
+    position: relative;
+    width: 48px; height: 48px;
+    border: 1px solid rgba(255,255,255,0.1);
     background: rgba(255,255,255,0.04);
-    color: rgba(255,255,255,0.6);
-    border-radius: 20px;
+    border-radius: 14px;
     cursor: pointer;
-    font-size: 12px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    transition: all 0.2s;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 3px;
+    transition: background 0.2s, border-color 0.2s, transform 0.15s;
+    backdrop-filter: blur(12px);
+    color: rgba(255,255,255,0.45);
+    overflow: visible;
   }
-  .shape-btn:hover  { background: rgba(255,255,255,0.1); color: #fff; }
-  .shape-btn.active { background: rgba(80,160,255,0.2); border-color: rgba(80,160,255,0.5); color: #7bf; }
+  .shape-btn:hover { background: rgba(255,255,255,0.09); color: rgba(255,255,255,0.8); transform: scale(1.06); }
+  .shape-btn.active {
+    background: rgba(70,140,255,0.18);
+    border-color: rgba(70,140,255,0.45);
+    color: rgba(130,195,255,0.95);
+  }
+  .shape-btn svg { width: 20px; height: 20px; }
+  .shape-label {
+    font-size: 8px; letter-spacing: 0.08em; text-transform: uppercase;
+    line-height: 1; pointer-events: none;
+  }
+  .shape-tooltip {
+    position: absolute;
+    left: calc(100% + 10px);
+    top: 50%; transform: translateY(-50%);
+    background: rgba(20,20,30,0.88);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.7);
+    font-size: 11px; letter-spacing: 0.05em;
+    padding: 4px 10px; border-radius: 8px; white-space: nowrap;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.15s;
+    backdrop-filter: blur(8px);
+  }
+  .shape-btn:hover .shape-tooltip { opacity: 1; }
 
-  #status {
+  /* ── Bottom hint ────────────────────────────────────── */
+  #hint-bar {
     position: fixed;
-    top: 16px;
-    left: 16px;
-    font-size: 11px;
-    color: rgba(255,255,255,0.3);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+    bottom: 22px;
+    left: 50%; transform: translateX(-50%);
+    display: flex; gap: 20px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 99px;
+    padding: 8px 20px;
+    backdrop-filter: blur(12px);
     z-index: 100;
   }
-  #status span { color: rgba(255,200,80,0.7); }
+  .hint-item {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 11px; color: rgba(255,255,255,0.3);
+    letter-spacing: 0.05em;
+  }
+  .hint-key {
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px;
+    padding: 2px 7px;
+    font-size: 10px; color: rgba(255,255,255,0.45);
+  }
 
-  #hint {
-    position: fixed;
-    bottom: 64px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 11px;
+  /* ── Top-left wordmark ──────────────────────────────── */
+  #wordmark {
+    position: fixed; top: 20px; left: 20px;
+    font-size: 13px; font-weight: 600;
+    letter-spacing: 0.18em; text-transform: uppercase;
     color: rgba(255,255,255,0.18);
-    letter-spacing: 0.07em;
-    text-transform: uppercase;
-    white-space: nowrap;
     z-index: 100;
   }
+
+  /* ── Morph progress ring ─────────────────────────────── */
+  #morph-ring {
+    position: fixed; bottom: 70px; right: 20px;
+    width: 34px; height: 34px; opacity: 0;
+    transition: opacity 0.3s;
+    z-index: 100;
+  }
+  #morph-ring.visible { opacity: 1; }
 </style>
 </head>
 <body>
 
 <canvas id="canvas"></canvas>
 
-<div id="webcam-container">
-  <video id="webcam" autoplay playsinline muted></video>
-  <canvas id="lm-canvas"></canvas>
-  <div id="webcam-label">Hand tracking</div>
+<div id="wordmark">HoloFlux</div>
+
+<!-- Webcam panel -->
+<div id="webcam-panel">
+  <div id="webcam-video-wrap">
+    <video id="webcam" autoplay playsinline muted></video>
+    <canvas id="lm-canvas"></canvas>
+  </div>
+  <div id="webcam-footer">
+    <div id="hand-status">
+      <div id="status-dot"></div>
+      <span id="status-label">Loading</span>
+    </div>
+    <div id="pinch-meter">
+      <span id="pinch-icon">✌</span>
+      <div id="pinch-bar-track"><div id="pinch-bar-fill"></div></div>
+    </div>
+  </div>
 </div>
 
-<div id="ui">
-  <button class="shape-btn active" data-shape="sphere">Sphere</button>
-  <button class="shape-btn" data-shape="cube">Cube</button>
-  <button class="shape-btn" data-shape="wave">Wave</button>
+<!-- Shape selector sidebar -->
+<div id="shape-selector">
+  <button class="shape-btn active" data-shape="sphere">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4">
+      <circle cx="10" cy="10" r="7"/>
+      <ellipse cx="10" cy="10" rx="3.5" ry="7"/>
+      <line x1="3" y1="10" x2="17" y2="10"/>
+    </svg>
+    <span class="shape-label">Sphere</span>
+    <span class="shape-tooltip">Sphere</span>
+  </button>
+  <button class="shape-btn" data-shape="cube">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4">
+      <path d="M3 6l7-3 7 3v8l-7 3-7-3z"/>
+      <path d="M10 3v14M3 6l7 4 7-4"/>
+    </svg>
+    <span class="shape-label">Cube</span>
+    <span class="shape-tooltip">Cube</span>
+  </button>
+  <button class="shape-btn" data-shape="wave">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4">
+      <path d="M2 13 Q5 7 8 10 Q11 13 14 7 Q17 1 20 7"/>
+      <line x1="2" y1="16" x2="18" y2="16" stroke-opacity="0.4"/>
+    </svg>
+    <span class="shape-label">Wave</span>
+    <span class="shape-tooltip">Wave field</span>
+  </button>
+  <button class="shape-btn" data-shape="torus">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4">
+      <ellipse cx="10" cy="10" rx="7" ry="4"/>
+      <ellipse cx="10" cy="10" rx="3" ry="1.5"/>
+    </svg>
+    <span class="shape-label">Torus</span>
+    <span class="shape-tooltip">Torus ring</span>
+  </button>
 </div>
 
-<div id="hint">Index finger → rotate &nbsp;·&nbsp; Pinch spread → zoom</div>
-<div id="status">Mode: <span id="mode-label">Loading…</span></div>
+<!-- Morph progress ring -->
+<svg id="morph-ring" viewBox="0 0 34 34">
+  <circle cx="17" cy="17" r="14" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="2.5"/>
+  <circle id="morph-arc" cx="17" cy="17" r="14" fill="none"
+    stroke="rgba(80,160,255,0.6)" stroke-width="2.5"
+    stroke-dasharray="88" stroke-dashoffset="88"
+    stroke-linecap="round"
+    transform="rotate(-90 17 17)"/>
+</svg>
+
+<!-- Bottom hint -->
+<div id="hint-bar">
+  <div class="hint-item">
+    <span class="hint-key">☝</span>
+    <span>index tip → rotate</span>
+  </div>
+  <div class="hint-item">
+    <span class="hint-key">✌</span>
+    <span>pinch spread → zoom</span>
+  </div>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
@@ -120,41 +251,45 @@
 
 <script>
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
-const PARTICLE_COUNT = 8000;
-const MORPH_SPEED    = 0.035;
-const COLOR_SPEED    = 0.003;
-const CAM_LERP       = 0.06;
-const HAND_LERP      = 0.09;
-const ZOOM_LERP      = 0.05;
+const PARTICLE_COUNT = 10000;
+const MORPH_SPEED    = 0.028;
+const COLOR_SPEED    = 0.0025;
+const CAM_LERP       = 0.055;
+const HAND_LERP      = 0.075;
+const ZOOM_LERP      = 0.045;
 const SPREAD         = 2.8;
+const AUTO_ROT_SPEED = 0.003;  // auto-rotate when no hand present
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 let renderer, scene, camera, points, geo, posAttr, colorAttr;
-let targets       = {};
+let targets = {};
 let currentShape  = 'sphere';
 let morphProgress = 1;
 let morphFrom = null, morphTo = null;
 
-let camYaw = 0, camPitch = 0, camDist = 5;
-let targetYaw = 0, targetPitch = 0, targetDist = 5;
+let camYaw = 0, camPitch = 0, camDist = 5.5;
+let targetYaw = 0, targetPitch = 0, targetDist = 5.5;
 
-// hand state — raw values written by mediapipe callback
 let rawIndexX = 0.5, rawIndexY = 0.5, rawPinchDist = 0.15;
-// smoothed values used in render loop
-let smIndexX = 0.5, smIndexY = 0.5, smPinchDist = 0.15;
+let smIndexX  = 0.5, smIndexY  = 0.5, smPinchDist  = 0.15;
 
-let hueOffset = 0;
+let hueOffset   = 0;
+let waveTime    = 0;
+let handVisible = false;
+let autoYaw     = 0;
+let clock;
 
 // ─── INIT SCENE ───────────────────────────────────────────────────────────────
 function initScene() {
   renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('canvas'), antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setClearColor(0x050505);
+  renderer.setClearColor(0x080810);
 
   scene  = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
-  camera.position.set(0, 0, 5);
+  camera.position.set(0, 0, 5.5);
+  clock  = new THREE.Clock();
 
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -179,9 +314,8 @@ function makeSphere(n) {
 
 function makeCube(n) {
   const arr = new Float32Array(n * 3);
-  const s   = SPREAD * 0.9;
-  // deterministic LCG so shape is stable across morphs
-  let seed = 42;
+  const s   = SPREAD * 0.86;
+  let seed  = 42;
   const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 0xffffffff; };
   for (let i = 0; i < n; i++) {
     const face = Math.floor(rand() * 6);
@@ -195,17 +329,36 @@ function makeCube(n) {
   return arr;
 }
 
-function makeWave(n) {
+function makeWave(n, t = 0) {
   const arr  = new Float32Array(n * 3);
-  const cols = Math.ceil(Math.sqrt(n));
+  const cols = Math.ceil(Math.sqrt(n * 1.6));
   const rows = Math.ceil(n / cols);
-  const sx   = SPREAD * 2 / cols;
-  const sz   = SPREAD * 2 / rows;
+  const sx   = (SPREAD * 2.1) / cols;
+  const sz   = (SPREAD * 2.1) / rows;
   for (let i = 0; i < n; i++) {
     const c = i % cols, r = Math.floor(i / cols);
     const x = (c - cols * 0.5) * sx;
     const z = (r - rows * 0.5) * sz;
-    arr[i*3]=x; arr[i*3+1]=Math.sin(x*1.2)*Math.cos(z*0.9)*0.8; arr[i*3+2]=z;
+    const d = Math.sqrt(x*x + z*z);
+    arr[i*3]   = x;
+    arr[i*3+1] = Math.sin(x * 1.1 + t) * Math.cos(z * 0.85 + t * 0.7) * 0.9
+               + Math.sin(d * 1.4 - t * 1.2) * 0.4;
+    arr[i*3+2] = z;
+  }
+  return arr;
+}
+
+function makeTorus(n) {
+  const arr = new Float32Array(n * 3);
+  const R   = SPREAD * 0.75;  // major radius
+  const r_t = SPREAD * 0.38;  // tube radius
+  for (let i = 0; i < n; i++) {
+    const u = (i / n) * Math.PI * 2;
+    // distribute evenly around tube using golden angle
+    const v = Math.PI * (1 + Math.sqrt(5)) * i;
+    arr[i*3]   = (R + r_t * Math.cos(v)) * Math.cos(u);
+    arr[i*3+1] = r_t * Math.sin(v);
+    arr[i*3+2] = (R + r_t * Math.cos(v)) * Math.sin(u);
   }
   return arr;
 }
@@ -214,7 +367,8 @@ function makeWave(n) {
 function initParticles() {
   targets.sphere = makeSphere(PARTICLE_COUNT);
   targets.cube   = makeCube(PARTICLE_COUNT);
-  targets.wave   = makeWave(PARTICLE_COUNT);
+  targets.wave   = makeWave(PARTICLE_COUNT, 0);
+  targets.torus  = makeTorus(PARTICLE_COUNT);
 
   geo       = new THREE.BufferGeometry();
   posAttr   = new THREE.BufferAttribute(new Float32Array(targets.sphere), 3);
@@ -225,9 +379,12 @@ function initParticles() {
   geo.setAttribute('color',    colorAttr);
 
   points = new THREE.Points(geo, new THREE.PointsMaterial({
-    size: 0.025, vertexColors: true,
-    transparent: true, opacity: 0.85,
-    sizeAttenuation: true, depthWrite: false,
+    size: 0.022,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.88,
+    sizeAttenuation: true,
+    depthWrite: false,
   }));
   scene.add(points);
   morphTo = morphFrom = targets.sphere;
@@ -235,24 +392,52 @@ function initParticles() {
 }
 
 // ─── MORPH ────────────────────────────────────────────────────────────────────
+const morphRing    = document.getElementById('morph-ring');
+const morphArc     = document.getElementById('morph-arc');
+const ARC_TOTAL    = 88; // 2π×14 ≈ 87.96
+
 function setShape(name) {
   if (name === currentShape) return;
-  morphFrom = new Float32Array(posAttr.array);
-  morphTo   = targets[name];
+  morphFrom     = new Float32Array(posAttr.array);
+  morphTo       = targets[name];
   morphProgress = 0;
   currentShape  = name;
   document.querySelectorAll('.shape-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.shape === name));
+  morphRing.classList.add('visible');
 }
 
-function updateMorph() {
-  if (morphProgress >= 1) return;
+function updateMorph(dt) {
+  if (currentShape === 'wave') {
+    // live-update wave targets so they ripple even mid-morph
+    waveTime += dt * 0.55;
+    const fresh = makeWave(PARTICLE_COUNT, waveTime);
+    if (morphProgress >= 1) {
+      posAttr.array.set(fresh);
+      posAttr.needsUpdate = true;
+      return;
+    }
+    morphTo = fresh;
+  }
+
+  if (morphProgress >= 1) {
+    morphRing.classList.remove('visible');
+    return;
+  }
+
   morphProgress = Math.min(1, morphProgress + MORPH_SPEED);
-  const t = morphProgress * morphProgress * (3 - 2 * morphProgress);
-  const p = posAttr.array;
+  // smooth-step³ easing
+  const t2 = morphProgress * morphProgress;
+  const t  = t2 * (3 - 2 * morphProgress);
+  const p  = posAttr.array;
   for (let i = 0; i < PARTICLE_COUNT * 3; i++)
     p[i] = morphFrom[i] + (morphTo[i] - morphFrom[i]) * t;
   posAttr.needsUpdate = true;
+
+  // update ring
+  const offset = ARC_TOTAL * (1 - morphProgress);
+  morphArc.setAttribute('stroke-dashoffset', offset.toFixed(2));
+  if (morphProgress >= 1) morphRing.classList.remove('visible');
 }
 
 // ─── COLORS ───────────────────────────────────────────────────────────────────
@@ -261,10 +446,15 @@ function updateColors() {
   const col = colorAttr.array;
   const c   = new THREE.Color();
   for (let i = 0; i < PARTICLE_COUNT; i++) {
-    const px = posAttr.array[i*3], py = posAttr.array[i*3+1], pz = posAttr.array[i*3+2];
+    const px = posAttr.array[i*3];
+    const py = posAttr.array[i*3+1];
+    const pz = posAttr.array[i*3+2];
     const d  = Math.sqrt(px*px + py*py + pz*pz) / (SPREAD * 1.2);
-    c.setHSL((hueOffset + d*0.35 + py*0.05) % 1, 0.75, 0.55 + d*0.2);
-    col[i*3]=c.r; col[i*3+1]=c.g; col[i*3+2]=c.b;
+    const hue = (hueOffset + d * 0.32 + py * 0.04) % 1;
+    const sat = 0.72;
+    const lit = 0.52 + d * 0.22;
+    c.setHSL(hue, sat, lit);
+    col[i*3] = c.r; col[i*3+1] = c.g; col[i*3+2] = c.b;
   }
   colorAttr.needsUpdate = true;
 }
@@ -272,61 +462,68 @@ function updateColors() {
 // ─── LANDMARK OVERLAY ─────────────────────────────────────────────────────────
 const lmCanvas = document.getElementById('lm-canvas');
 const lmCtx    = lmCanvas.getContext('2d');
-const W = 180, H = 135;
+const OW = 188, OH = 141;
+
+const CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],
+  [13,17],[17,18],[18,19],[19,20],[0,17],
+];
 
 function drawOverlay(lm) {
-  lmCanvas.width = W; lmCanvas.height = H;
-  lmCtx.clearRect(0, 0, W, H);
+  lmCanvas.width = OW; lmCanvas.height = OH;
+  lmCtx.clearRect(0, 0, OW, OH);
 
-  // draw all hand connections lightly
-  const CONNECTIONS = [
-    [0,1],[1,2],[2,3],[3,4],      // thumb
-    [0,5],[5,6],[6,7],[7,8],      // index
-    [5,9],[9,10],[10,11],[11,12], // middle
-    [9,13],[13,14],[14,15],[15,16],
-    [13,17],[17,18],[18,19],[19,20],
-    [0,17]
-  ];
-  lmCtx.strokeStyle = 'rgba(255,255,255,0.12)';
-  lmCtx.lineWidth = 1;
+  lmCtx.strokeStyle = 'rgba(255,255,255,0.1)';
+  lmCtx.lineWidth   = 1;
   CONNECTIONS.forEach(([a, b]) => {
     lmCtx.beginPath();
-    lmCtx.moveTo(lm[a].x * W, lm[a].y * H);
-    lmCtx.lineTo(lm[b].x * W, lm[b].y * H);
+    lmCtx.moveTo(lm[a].x * OW, lm[a].y * OH);
+    lmCtx.lineTo(lm[b].x * OW, lm[b].y * OH);
     lmCtx.stroke();
   });
 
-  // highlight index tip (8) and thumb tip (4)
-  const idx = { x: lm[8].x * W, y: lm[8].y * H };
-  const thm = { x: lm[4].x * W, y: lm[4].y * H };
+  const idx = { x: lm[8].x * OW, y: lm[8].y * OH };
+  const thm = { x: lm[4].x * OW, y: lm[4].y * OH };
 
   // pinch line
+  const grad = lmCtx.createLinearGradient(idx.x, idx.y, thm.x, thm.y);
+  grad.addColorStop(0, 'rgba(80,180,255,0.7)');
+  grad.addColorStop(1, 'rgba(255,160,60,0.7)');
   lmCtx.beginPath();
   lmCtx.moveTo(idx.x, idx.y);
   lmCtx.lineTo(thm.x, thm.y);
-  lmCtx.strokeStyle = 'rgba(80,180,255,0.6)';
-  lmCtx.lineWidth = 1.5;
+  lmCtx.strokeStyle = grad;
+  lmCtx.lineWidth   = 1.5;
   lmCtx.stroke();
 
-  // index dot (blue)
+  // index dot
   lmCtx.beginPath();
-  lmCtx.arc(idx.x, idx.y, 5, 0, Math.PI*2);
+  lmCtx.arc(idx.x, idx.y, 4.5, 0, Math.PI*2);
   lmCtx.fillStyle = '#4af'; lmCtx.fill();
 
-  // thumb dot (amber)
+  // thumb dot
   lmCtx.beginPath();
-  lmCtx.arc(thm.x, thm.y, 5, 0, Math.PI*2);
+  lmCtx.arc(thm.x, thm.y, 4.5, 0, Math.PI*2);
   lmCtx.fillStyle = '#fa4'; lmCtx.fill();
 }
 
-// ─── WEBCAM + MEDIAPIPE HANDS ─────────────────────────────────────────────────
-const video    = document.getElementById('webcam');
-const modeSpan = document.getElementById('mode-label');
+// ─── STATUS UI ────────────────────────────────────────────────────────────────
+const statusDot   = document.getElementById('status-dot');
+const statusLabel = document.getElementById('status-label');
+const pinchFill   = document.getElementById('pinch-bar-fill');
 
-function setStatus(text, color) {
-  modeSpan.textContent = text;
-  modeSpan.style.color = color;
+function setStatus(state, text) {
+  statusLabel.textContent = text;
+  statusDot.className = '';
+  if (state === 'ready') statusDot.classList.add('ready');
+  if (state === 'error') statusDot.classList.add('error');
 }
+
+// ─── WEBCAM + MEDIAPIPE HANDS ─────────────────────────────────────────────────
+const video = document.getElementById('webcam');
 
 async function initWebcam() {
   try {
@@ -338,78 +535,74 @@ async function initWebcam() {
     initHandTracking();
   } catch (e) {
     console.error('Camera denied:', e);
-    setStatus('Camera denied', 'rgba(255,80,80,0.8)');
+    setStatus('error', 'Camera off');
   }
 }
 
 function initHandTracking() {
-  setStatus('Loading model…', 'rgba(255,200,80,0.7)');
+  setStatus('loading', 'Loading…');
 
   const hands = new Hands({
     locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`,
   });
-
   hands.setOptions({
-    maxNumHands:             1,
-    modelComplexity:         0,   // lite model — fast & stable
-    minDetectionConfidence:  0.65,
-    minTrackingConfidence:   0.55,
+    maxNumHands: 1, modelComplexity: 0,
+    minDetectionConfidence: 0.65, minTrackingConfidence: 0.55,
   });
 
   hands.onResults((results) => {
     if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-      const lm        = results.multiHandLandmarks[0];
-      const indexTip  = lm[8];   // index fingertip
-      const thumbTip  = lm[4];   // thumb tip
+      const lm       = results.multiHandLandmarks[0];
+      const indexTip = lm[8];
+      const thumbTip = lm[4];
 
-      // mirror x to match CSS-mirrored video feed
       rawIndexX = 1 - indexTip.x;
       rawIndexY = indexTip.y;
 
-      // normalised euclidean pinch distance
       const dx = indexTip.x - thumbTip.x;
       const dy = indexTip.y - thumbTip.y;
       rawPinchDist = Math.sqrt(dx*dx + dy*dy);
 
-      setStatus('Hand ✓', 'rgba(80,220,120,0.8)');
+      handVisible = true;
+      setStatus('ready', 'Hand ✓');
       drawOverlay(lm);
     } else {
-      // no hand — gently drift to neutral
+      handVisible = false;
       rawIndexX    += (0.5  - rawIndexX)    * 0.03;
       rawIndexY    += (0.5  - rawIndexY)    * 0.03;
       rawPinchDist += (0.15 - rawPinchDist) * 0.03;
-      setStatus('Show hand', 'rgba(255,200,80,0.6)');
-      lmCtx.clearRect(0, 0, W, H);
+      setStatus('waiting', 'Show hand');
+      lmCtx.clearRect(0, 0, OW, OH);
     }
   });
 
-  // MediaPipe Camera utility pumps frames reliably
   const mpCam = new Camera(video, {
     onFrame: async () => { await hands.send({ image: video }); },
     width: 640, height: 480,
   });
-  mpCam.start().then(() => setStatus('Show hand', 'rgba(255,200,80,0.6)'));
+  mpCam.start().then(() => setStatus('waiting', 'Show hand'));
 }
 
-// ─── HANDLE INTERACTION ───────────────────────────────────────────────────────
-function handleInteraction() {
-  // lerp raw → smoothed
+// ─── INTERACTION ──────────────────────────────────────────────────────────────
+function handleInteraction(dt) {
   smIndexX    += (rawIndexX    - smIndexX)    * HAND_LERP;
   smIndexY    += (rawIndexY    - smIndexY)    * HAND_LERP;
   smPinchDist += (rawPinchDist - smPinchDist) * ZOOM_LERP;
 
-  // index tip position → yaw / pitch
-  // [0..1] → symmetric rotation range
-  targetYaw   = (smIndexX - 0.5) * Math.PI * 1.8;
-  targetPitch = (smIndexY - 0.5) * Math.PI * 1.0;
-  targetPitch = Math.max(-Math.PI * 0.48, Math.min(Math.PI * 0.48, targetPitch));
+  if (handVisible) {
+    targetYaw   = (smIndexX - 0.5) * Math.PI * 1.8;
+    targetPitch = (smIndexY - 0.5) * Math.PI * 0.95;
+    targetPitch = Math.max(-Math.PI * 0.46, Math.min(Math.PI * 0.46, targetPitch));
+  } else {
+    // gentle auto-rotation when no hand
+    autoYaw += AUTO_ROT_SPEED;
+    targetYaw   = autoYaw;
+    targetPitch = Math.sin(autoYaw * 0.3) * 0.22;
+  }
 
-  // pinch distance → camera zoom
-  // small dist (~0.03) = zoomed in, large spread (~0.35) = zoomed out
   const pinchNorm = Math.max(0, Math.min(1, (smPinchDist - 0.03) / 0.32));
-  targetDist = 2.5 + pinchNorm * 6.5;
+  targetDist = 2.2 + pinchNorm * 7.0;
 
-  // smooth camera
   camYaw   += (targetYaw   - camYaw)   * CAM_LERP;
   camPitch += (targetPitch - camPitch) * CAM_LERP;
   camDist  += (targetDist  - camDist)  * ZOOM_LERP;
@@ -417,14 +610,18 @@ function handleInteraction() {
   points.rotation.y = camYaw;
   points.rotation.x = camPitch;
   camera.position.z = camDist;
+
+  // update pinch meter
+  pinchFill.style.width = (pinchNorm * 100).toFixed(1) + '%';
 }
 
 // ─── ANIMATE LOOP ─────────────────────────────────────────────────────────────
 function animate() {
   requestAnimationFrame(animate);
-  updateMorph();
+  const dt = clock.getDelta();
+  updateMorph(dt);
   updateColors();
-  handleInteraction();
+  handleInteraction(dt);
   renderer.render(scene, camera);
 }
 
