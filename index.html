@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HoloFlux</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #050505; overflow: hidden; font-family: sans-serif; }
+  #canvas { display: block; width: 100vw; height: 100vh; }
+
+  #webcam-container {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    width: 180px;
+    height: 135px;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.15);
+    z-index: 100;
+    background: #111;
+  }
+  #webcam {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+  }
+  #lm-canvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    transform: scaleX(-1);
+    pointer-events: none;
+  }
+  #webcam-label {
+    position: absolute;
+    bottom: 6px;
+    left: 8px;
+    font-size: 10px;
+    color: rgba(255,255,255,0.4);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    pointer-events: none;
+  }
+
+  #ui {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 10px;
+    z-index: 100;
+  }
+  .shape-btn {
+    padding: 8px 18px;
+    border: 1px solid rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.04);
+    color: rgba(255,255,255,0.6);
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    transition: all 0.2s;
+  }
+  .shape-btn:hover  { background: rgba(255,255,255,0.1); color: #fff; }
+  .shape-btn.active { background: rgba(80,160,255,0.2); border-color: rgba(80,160,255,0.5); color: #7bf; }
+
+  #status {
+    position: fixed;
+    top: 16px;
+    left: 16px;
+    font-size: 11px;
+    color: rgba(255,255,255,0.3);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    z-index: 100;
+  }
+  #status span { color: rgba(255,200,80,0.7); }
+
+  #hint {
+    position: fixed;
+    bottom: 64px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 11px;
+    color: rgba(255,255,255,0.18);
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    z-index: 100;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+
+<div id="webcam-container">
+  <video id="webcam" autoplay playsinline muted></video>
+  <canvas id="lm-canvas"></canvas>
+  <div id="webcam-label">Hand tracking</div>
+</div>
+
+<div id="ui">
+  <button class="shape-btn active" data-shape="sphere">Sphere</button>
+  <button class="shape-btn" data-shape="cube">Cube</button>
+  <button class="shape-btn" data-shape="wave">Wave</button>
+</div>
+
+<div id="hint">Index finger → rotate &nbsp;·&nbsp; Pinch spread → zoom</div>
+<div id="status">Mode: <span id="mode-label">Loading…</span></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<script>
+// ─── CONFIG ───────────────────────────────────────────────────────────────────
+const PARTICLE_COUNT = 8000;
+const MORPH_SPEED    = 0.035;
+const COLOR_SPEED    = 0.003;
+const CAM_LERP       = 0.06;
+const HAND_LERP      = 0.09;
+const ZOOM_LERP      = 0.05;
+const SPREAD         = 2.8;
+
+// ─── STATE ────────────────────────────────────────────────────────────────────
+let renderer, scene, camera, points, geo, posAttr, colorAttr;
+let targets       = {};
+let currentShape  = 'sphere';
+let morphProgress = 1;
+let morphFrom = null, morphTo = null;
+
+let camYaw = 0, camPitch = 0, camDist = 5;
+let targetYaw = 0, targetPitch = 0, targetDist = 5;
+
+// hand state — raw values written by mediapipe callback
+let rawIndexX = 0.5, rawIndexY = 0.5, rawPinchDist = 0.15;
+// smoothed values used in render loop
+let smIndexX = 0.5, smIndexY = 0.5, smPinchDist = 0.15;
+
+let hueOffset = 0;
+
+// ─── INIT SCENE ───────────────────────────────────────────────────────────────
+function initScene() {
+  renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('canvas'), antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setClearColor(0x050505);
+
+  scene  = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+  camera.position.set(0, 0, 5);
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+}
+
+// ─── SHAPE GENERATORS ─────────────────────────────────────────────────────────
+function makeSphere(n) {
+  const arr = new Float32Array(n * 3);
+  const r   = SPREAD * 0.85;
+  for (let i = 0; i < n; i++) {
+    const theta = Math.acos(1 - 2 * (i + 0.5) / n);
+    const phi   = Math.PI * (1 + Math.sqrt(5)) * i;
+    arr[i*3]   = r * Math.sin(theta) * Math.cos(phi);
+    arr[i*3+1] = r * Math.sin(theta) * Math.sin(phi);
+    arr[i*3+2] = r * Math.cos(theta);
+  }
+  return arr;
+}
+
+function makeCube(n) {
+  const arr = new Float32Array(n * 3);
+  const s   = SPREAD * 0.9;
+  // deterministic LCG so shape is stable across morphs
+  let seed = 42;
+  const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 0xffffffff; };
+  for (let i = 0; i < n; i++) {
+    const face = Math.floor(rand() * 6);
+    const u = (rand() - 0.5) * 2 * s;
+    const v = (rand() - 0.5) * 2 * s;
+    const h = (rand() < 0.5 ? -1 : 1) * s;
+    if      (face < 2) { arr[i*3]=h; arr[i*3+1]=u; arr[i*3+2]=v; }
+    else if (face < 4) { arr[i*3]=u; arr[i*3+1]=h; arr[i*3+2]=v; }
+    else               { arr[i*3]=u; arr[i*3+1]=v; arr[i*3+2]=h; }
+  }
+  return arr;
+}
+
+function makeWave(n) {
+  const arr  = new Float32Array(n * 3);
+  const cols = Math.ceil(Math.sqrt(n));
+  const rows = Math.ceil(n / cols);
+  const sx   = SPREAD * 2 / cols;
+  const sz   = SPREAD * 2 / rows;
+  for (let i = 0; i < n; i++) {
+    const c = i % cols, r = Math.floor(i / cols);
+    const x = (c - cols * 0.5) * sx;
+    const z = (r - rows * 0.5) * sz;
+    arr[i*3]=x; arr[i*3+1]=Math.sin(x*1.2)*Math.cos(z*0.9)*0.8; arr[i*3+2]=z;
+  }
+  return arr;
+}
+
+// ─── INIT PARTICLES ───────────────────────────────────────────────────────────
+function initParticles() {
+  targets.sphere = makeSphere(PARTICLE_COUNT);
+  targets.cube   = makeCube(PARTICLE_COUNT);
+  targets.wave   = makeWave(PARTICLE_COUNT);
+
+  geo       = new THREE.BufferGeometry();
+  posAttr   = new THREE.BufferAttribute(new Float32Array(targets.sphere), 3);
+  colorAttr = new THREE.BufferAttribute(new Float32Array(PARTICLE_COUNT * 3), 3);
+  posAttr.setUsage(THREE.DynamicDrawUsage);
+  colorAttr.setUsage(THREE.DynamicDrawUsage);
+  geo.setAttribute('position', posAttr);
+  geo.setAttribute('color',    colorAttr);
+
+  points = new THREE.Points(geo, new THREE.PointsMaterial({
+    size: 0.025, vertexColors: true,
+    transparent: true, opacity: 0.85,
+    sizeAttenuation: true, depthWrite: false,
+  }));
+  scene.add(points);
+  morphTo = morphFrom = targets.sphere;
+  morphProgress = 1;
+}
+
+// ─── MORPH ────────────────────────────────────────────────────────────────────
+function setShape(name) {
+  if (name === currentShape) return;
+  morphFrom = new Float32Array(posAttr.array);
+  morphTo   = targets[name];
+  morphProgress = 0;
+  currentShape  = name;
+  document.querySelectorAll('.shape-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.shape === name));
+}
+
+function updateMorph() {
+  if (morphProgress >= 1) return;
+  morphProgress = Math.min(1, morphProgress + MORPH_SPEED);
+  const t = morphProgress * morphProgress * (3 - 2 * morphProgress);
+  const p = posAttr.array;
+  for (let i = 0; i < PARTICLE_COUNT * 3; i++)
+    p[i] = morphFrom[i] + (morphTo[i] - morphFrom[i]) * t;
+  posAttr.needsUpdate = true;
+}
+
+// ─── COLORS ───────────────────────────────────────────────────────────────────
+function updateColors() {
+  hueOffset += COLOR_SPEED;
+  const col = colorAttr.array;
+  const c   = new THREE.Color();
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    const px = posAttr.array[i*3], py = posAttr.array[i*3+1], pz = posAttr.array[i*3+2];
+    const d  = Math.sqrt(px*px + py*py + pz*pz) / (SPREAD * 1.2);
+    c.setHSL((hueOffset + d*0.35 + py*0.05) % 1, 0.75, 0.55 + d*0.2);
+    col[i*3]=c.r; col[i*3+1]=c.g; col[i*3+2]=c.b;
+  }
+  colorAttr.needsUpdate = true;
+}
+
+// ─── LANDMARK OVERLAY ─────────────────────────────────────────────────────────
+const lmCanvas = document.getElementById('lm-canvas');
+const lmCtx    = lmCanvas.getContext('2d');
+const W = 180, H = 135;
+
+function drawOverlay(lm) {
+  lmCanvas.width = W; lmCanvas.height = H;
+  lmCtx.clearRect(0, 0, W, H);
+
+  // draw all hand connections lightly
+  const CONNECTIONS = [
+    [0,1],[1,2],[2,3],[3,4],      // thumb
+    [0,5],[5,6],[6,7],[7,8],      // index
+    [5,9],[9,10],[10,11],[11,12], // middle
+    [9,13],[13,14],[14,15],[15,16],
+    [13,17],[17,18],[18,19],[19,20],
+    [0,17]
+  ];
+  lmCtx.strokeStyle = 'rgba(255,255,255,0.12)';
+  lmCtx.lineWidth = 1;
+  CONNECTIONS.forEach(([a, b]) => {
+    lmCtx.beginPath();
+    lmCtx.moveTo(lm[a].x * W, lm[a].y * H);
+    lmCtx.lineTo(lm[b].x * W, lm[b].y * H);
+    lmCtx.stroke();
+  });
+
+  // highlight index tip (8) and thumb tip (4)
+  const idx = { x: lm[8].x * W, y: lm[8].y * H };
+  const thm = { x: lm[4].x * W, y: lm[4].y * H };
+
+  // pinch line
+  lmCtx.beginPath();
+  lmCtx.moveTo(idx.x, idx.y);
+  lmCtx.lineTo(thm.x, thm.y);
+  lmCtx.strokeStyle = 'rgba(80,180,255,0.6)';
+  lmCtx.lineWidth = 1.5;
+  lmCtx.stroke();
+
+  // index dot (blue)
+  lmCtx.beginPath();
+  lmCtx.arc(idx.x, idx.y, 5, 0, Math.PI*2);
+  lmCtx.fillStyle = '#4af'; lmCtx.fill();
+
+  // thumb dot (amber)
+  lmCtx.beginPath();
+  lmCtx.arc(thm.x, thm.y, 5, 0, Math.PI*2);
+  lmCtx.fillStyle = '#fa4'; lmCtx.fill();
+}
+
+// ─── WEBCAM + MEDIAPIPE HANDS ─────────────────────────────────────────────────
+const video    = document.getElementById('webcam');
+const modeSpan = document.getElementById('mode-label');
+
+function setStatus(text, color) {
+  modeSpan.textContent = text;
+  modeSpan.style.color = color;
+}
+
+async function initWebcam() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 640, height: 480, facingMode: 'user' }, audio: false,
+    });
+    video.srcObject = stream;
+    await video.play();
+    initHandTracking();
+  } catch (e) {
+    console.error('Camera denied:', e);
+    setStatus('Camera denied', 'rgba(255,80,80,0.8)');
+  }
+}
+
+function initHandTracking() {
+  setStatus('Loading model…', 'rgba(255,200,80,0.7)');
+
+  const hands = new Hands({
+    locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`,
+  });
+
+  hands.setOptions({
+    maxNumHands:             1,
+    modelComplexity:         0,   // lite model — fast & stable
+    minDetectionConfidence:  0.65,
+    minTrackingConfidence:   0.55,
+  });
+
+  hands.onResults((results) => {
+    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+      const lm        = results.multiHandLandmarks[0];
+      const indexTip  = lm[8];   // index fingertip
+      const thumbTip  = lm[4];   // thumb tip
+
+      // mirror x to match CSS-mirrored video feed
+      rawIndexX = 1 - indexTip.x;
+      rawIndexY = indexTip.y;
+
+      // normalised euclidean pinch distance
+      const dx = indexTip.x - thumbTip.x;
+      const dy = indexTip.y - thumbTip.y;
+      rawPinchDist = Math.sqrt(dx*dx + dy*dy);
+
+      setStatus('Hand ✓', 'rgba(80,220,120,0.8)');
+      drawOverlay(lm);
+    } else {
+      // no hand — gently drift to neutral
+      rawIndexX    += (0.5  - rawIndexX)    * 0.03;
+      rawIndexY    += (0.5  - rawIndexY)    * 0.03;
+      rawPinchDist += (0.15 - rawPinchDist) * 0.03;
+      setStatus('Show hand', 'rgba(255,200,80,0.6)');
+      lmCtx.clearRect(0, 0, W, H);
+    }
+  });
+
+  // MediaPipe Camera utility pumps frames reliably
+  const mpCam = new Camera(video, {
+    onFrame: async () => { await hands.send({ image: video }); },
+    width: 640, height: 480,
+  });
+  mpCam.start().then(() => setStatus('Show hand', 'rgba(255,200,80,0.6)'));
+}
+
+// ─── HANDLE INTERACTION ───────────────────────────────────────────────────────
+function handleInteraction() {
+  // lerp raw → smoothed
+  smIndexX    += (rawIndexX    - smIndexX)    * HAND_LERP;
+  smIndexY    += (rawIndexY    - smIndexY)    * HAND_LERP;
+  smPinchDist += (rawPinchDist - smPinchDist) * ZOOM_LERP;
+
+  // index tip position → yaw / pitch
+  // [0..1] → symmetric rotation range
+  targetYaw   = (smIndexX - 0.5) * Math.PI * 1.8;
+  targetPitch = (smIndexY - 0.5) * Math.PI * 1.0;
+  targetPitch = Math.max(-Math.PI * 0.48, Math.min(Math.PI * 0.48, targetPitch));
+
+  // pinch distance → camera zoom
+  // small dist (~0.03) = zoomed in, large spread (~0.35) = zoomed out
+  const pinchNorm = Math.max(0, Math.min(1, (smPinchDist - 0.03) / 0.32));
+  targetDist = 2.5 + pinchNorm * 6.5;
+
+  // smooth camera
+  camYaw   += (targetYaw   - camYaw)   * CAM_LERP;
+  camPitch += (targetPitch - camPitch) * CAM_LERP;
+  camDist  += (targetDist  - camDist)  * ZOOM_LERP;
+
+  points.rotation.y = camYaw;
+  points.rotation.x = camPitch;
+  camera.position.z = camDist;
+}
+
+// ─── ANIMATE LOOP ─────────────────────────────────────────────────────────────
+function animate() {
+  requestAnimationFrame(animate);
+  updateMorph();
+  updateColors();
+  handleInteraction();
+  renderer.render(scene, camera);
+}
+
+// ─── SHAPE BUTTONS ────────────────────────────────────────────────────────────
+document.querySelectorAll('.shape-btn').forEach(btn =>
+  btn.addEventListener('click', () => setShape(btn.dataset.shape)));
+
+// ─── BOOT ─────────────────────────────────────────────────────────────────────
+initScene();
+initParticles();
+animate();
+initWebcam();
+</script>
+</body>
+</html>
